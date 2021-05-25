@@ -163,7 +163,7 @@ workflow MitochondriaMultiSamplePipeline {
     #Array[File] theoretical_sensitivity_metrics = AlignAndCall.theoretical_sensitivity_metrics
     #Array[Int] mean_coverage = AlignAndCall.mean_coverage
 
-    #Array[File] contamination_metrics = AlignAndCall.contamination_metrics
+    Array[File] contamination_metrics = AlignAndCall.contamination_metrics
     #Array[Float] contamination = AlignAndCall.contamination
     #Array[String] major_haplogroup = AlignAndCall.major_haplogroup
 

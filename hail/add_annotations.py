@@ -12,15 +12,17 @@ from textwrap import dedent
 from gnomad.utils.annotations import age_hists_expr
 from gnomad.utils.reference_genome import add_reference_sequence
 from gnomad.utils.vep import vep_struct_to_csq
-from gnomad_qc.v3.resources.meta import meta
+#from gnomad_qc.v3.resources.meta import meta
 from gnomad.resources.grch38.gnomad import POPS
 from gnomad.sample_qc.ancestry import POP_NAMES #check this
+
 POP_NAMES["mid"] = "Middle Eastern"
 
 
 logging.basicConfig(format="%(asctime)s (%(name)s %(lineno)s): %(message)s", datefmt='%m/%d/%Y %I:%M:%S %p')
 logger = logging.getLogger("add annotations")
 logger.setLevel(logging.INFO)
+
 
 def format_mt(mt_path: str, hl_threshold: float = 0.95, alt_threshold: float = 0.01) -> hl.MatrixTable:
     """Sets HL to zero if below heteroplasmy threshold, adds in genotype based on HL
@@ -36,7 +38,7 @@ def format_mt(mt_path: str, hl_threshold: float = 0.95, alt_threshold: float = 0
     logger.info('Reading in MT...')
     mt = hl.read_matrix_table(mt_path)
 
-    mt = mt.rename({'VL': 'HL'})
+    #mt = mt.rename({'VL': 'HL'})
 
     # TODO: rename artifact-prone-site filter in combine script
     # replace hyphens in filters with underscores
@@ -63,7 +65,7 @@ def add_variant_context(input_mt: hl.MatrixTable) -> hl.MatrixTable:
     """
 
     # read in variant context data
-    vc_ht = hl.import_table("gs://gnomad-kristen/mitochondria/resources/variant_context/chrM_pos_ref_alt_context_categories.txt", impute=True)
+    vc_ht = hl.import_table("chrM_pos_ref_alt_context_categories.txt", impute=True)
 
     # split columns into separate annotations
     vc_ht = vc_ht.annotate(ref=vc_ht['POS.REF.ALT'].split('\.')[1],
@@ -511,6 +513,62 @@ def add_variant_annotations(input_mt: hl.MatrixTable, hl_threshold: float = 0.95
 
     return mt 
 
+def add_min_variant_annotations(input_mt: hl.MatrixTable, hl_threshold: float = 0.95) -> hl.MatrixTable:
+    """Adds variant annotations to the MatrixTable
+
+    :param MatrixTable input_mt: MatrixTable
+    :param float hl_threshold: heteroplasmy level threshold to determine homoplasmic variants
+    :return: annotated MatrixTable
+    :rtype: hl.MatrixTable
+    """
+
+
+    # calculate AC and AN
+    AC = hl.agg.count_where((input_mt.HL > 0.0))
+    AN = hl.agg.count_where(hl.is_defined(input_mt.HL))
+    AF = AC/AN
+
+    # calculate AC for het and hom variants, and histogram for HL
+    AC_hom = hl.agg.count_where(input_mt.HL >= hl_threshold)
+    AC_het = hl.agg.count_where((input_mt.HL < hl_threshold) & (input_mt.HL > 0.0))
+
+    # calculate AF
+    AF_hom = AC_hom/AN
+    AF_het = AC_het/AN
+
+    # calculate max individual heteroplasmy
+    max_HL = hl.agg.max(input_mt.HL)
+
+    annotation_struct = hl.struct(AC=AC,
+        AN=AN,
+        AF=AF,
+        AC_hom=AC_hom,
+        AC_het=AC_het,
+        AF_hom=AF_hom,
+        AF_het=AF_het,
+        max_hl=max_HL)
+
+
+    # add variant annotations
+    #mt = input_mt.annotate_rows(**dict(generate_expressions(input_mt, hl_threshold)))
+
+    mt = input_mt.annotate_rows(**dict(hl.struct(AC=AC,
+                                    AN=AN,
+                                    AF=AF,
+                                    AC_hom=AC_hom,
+                                    AC_het=AC_het,
+                                    AF_hom=AF_hom,
+                                    AF_het=AF_het,
+                                    max_hl=max_HL)))
+
+
+    # last-minute drops (ever add back in?)
+    #mt = mt.drop("AC", "AF", "hap_AC", "hap_AF", "hap_faf", "faf_hapmax", "alt_haps", "n_alt_haps")
+
+    mt = mt.annotate_rows(filters=hl.if_else(mt.filters=={"PASS"}, hl.empty_set(hl.tstr), mt.filters))
+
+    return mt 
+
 
 def generate_filter_histogram(input_mt: hl.MatrixTable, filter_name: str) -> hl.ArrayExpression:
     """Generates histogram for number of indiviudals with the specified sample-level filter at different heteroplasmy levels
@@ -667,8 +725,9 @@ def add_vep(input_mt: hl.MatrixTable, run_vep: bool, vep_output: str) -> hl.Matr
     """
 
     if run_vep:
-        vep_mt = hl.vep(input_mt)
-        vep_mt = vep_mt.checkpoint(vep_output, overwrite=True)
+        #vep_mt = hl.vep(input_mt)
+        vep_mt = hl.vep(input_mt,'vep85-loftee-ruddle-b38.json')
+        #vep_mt = vep_mt.checkpoint(vep_output, overwrite=True)
     else:
         vep_mt = hl.read_matrix_table(vep_output)
 
@@ -979,10 +1038,10 @@ def format_vcf(input_mt: hl.MatrixTable, output_dir: str, hl_threshold: float = 
 
 def main(args):
     mt_path = args.mt_path
-    all_output = args.all_output
+    #all_output = args.all_output
     run_vep = args.run_vep
     vep_results = args.vep_results
-    gnomad_subset = args.subset_to_gnomad_release
+    #gnomad_subset = args.subset_to_gnomad_release
     hl_threshold = args.hl_threshold
     alt_threshold = args.alt_threshold
 
@@ -995,21 +1054,23 @@ def main(args):
     logger.info('Reformatting MT...')
     mt = format_mt(mt_path, hl_threshold, alt_threshold)
 
-    logger.info('Adding annotations from terra...')
-    mt = add_terra_metadata(mt, all_output)
+    
+    #logger.info('Adding annotations from terra...')
+    #mt = add_terra_metadata(mt, all_output)
 
-    logger.info('Annotating haplogroup-defining variants...')
-    mt = add_hap_defining(mt)
+    #logger.info('Annotating haplogroup-defining variants...')
+    #mt = add_hap_defining(mt)
 
-    logger.info('Annotating tRNA predictions...')
-    mt = add_trna_predictions(mt)
+    #logger.info('Annotating tRNA predictions...')
+    #mt = add_trna_predictions(mt)
 
-    logger.info('Adding gnomAD metadata sample annotations...')
-    mt = add_gnomad_metadata(mt)
+    #logger.info('Adding gnomAD metadata sample annotations...')
+    #mt = add_gnomad_metadata(mt)
 
     logger.info('Adding variant context annotations...')
     mt = add_variant_context(mt)
 
+    '''
     # if specified, subet to only the gnomAD samples in the current release
     if gnomad_subset:
         logger.warn('Subsetting results to gnomAD release samples...')
@@ -1024,17 +1085,18 @@ def main(args):
 
     logger.info('Filtering out contaminated samples...')
     mt, n_contaminated = filter_by_contamination(mt, output_dir)
+    '''
 
-    logger.info('Switch build and checkpoint...')    
+    #logger.info('Switch build and checkpoint...')    
     # switch build 37 to build 38
     mt = mt.key_rows_by(locus=hl.locus("chrM", mt.locus.position, reference_genome='GRCh38'), alleles=mt.alleles)
-    mt = mt.checkpoint(f"{output_dir}/prior_to_vep.mt", overwrite=args.overwrite)
-
+    #mt = mt.checkpoint(f"{output_dir}/prior_to_vep.mt", overwrite=args.overwrite)
+    
     logger.info('Adding vep annotations...')
     mt = add_vep(mt, run_vep, vep_results)
 
-    logger.info('Adding dbsnp annotations...')
-    mt = add_rsids(mt)
+    #logger.info('Adding dbsnp annotations...')
+    #mt = add_rsids(mt)
 
     # set up output paths for callset
     annotated_mt_path = f'{output_dir}/annotated_combined{subset_name}.mt'
@@ -1051,6 +1113,7 @@ def main(args):
     sample_txt_drop_hap_path = f'{output_dir}/sample_annotations_drop_hap{subset_name}.txt'
     samples_vcf_drop_hap_path = f'{output_dir}/sample_annotations_drop_hap{subset_name}.vcf.bgz'
 
+    '''
     logger.info('Results will be output to the following files:')
     print(annotated_mt_path)
     print(sites_ht_path)
@@ -1063,23 +1126,27 @@ def main(args):
     print(samples_vcf_path)
     print(sites_vcf_path)
     print(samples_vcf_drop_hap_path)
+    '''
 
     logger.info('Annotating MT...')
-    mt, n_het_below_10_perc = add_filter_annotations(mt, alt_threshold)
+    #mt, n_het_below_10_perc = add_filter_annotations(mt, alt_threshold)
     mt = filter_genotypes(mt)
-    mt = add_variant_annotations(mt, hl_threshold)
-    mt = mt.checkpoint(annotated_mt_path, overwrite=args.overwrite)  # full matrix table for internal use
+    mt = add_min_variant_annotations(mt, hl_threshold)
+    #mt = mt.checkpoint(annotated_mt_path, overwrite=args.overwrite)  # full matrix table for internal use
 
-    logger.info('Generating summary statistics reports...')
-    report_stats(mt, output_dir, False, n_removed_below_cn, n_removed_above_cn, n_contaminated, n_het_below_10_perc)
-    report_stats(mt, output_dir, True, n_removed_below_cn, n_removed_above_cn, n_contaminated, n_het_below_10_perc)
+    #logger.info('Generating summary statistics reports...')
+    #report_stats(mt, output_dir, False, n_removed_below_cn, n_removed_above_cn, n_contaminated, n_het_below_10_perc)
+    #report_stats(mt, output_dir, True, n_removed_below_cn, n_removed_above_cn, n_contaminated, n_het_below_10_perc)
+    
 
     variant_ht = mt.rows()
-    variant_ht = variant_ht.drop('ref', 'alt', 'pos', 'strand', 'region', 'variant', 'variant_type', 'info')
-    variant_ht.export(sites_txt_path)  # sites-only txt file for external use
+    #variant_ht = variant_ht.drop('ref', 'alt', 'pos', 'strand', 'region', 'variant', 'variant_type', 'info')
+    variant_ht = variant_ht.drop('ref', 'alt', 'pos', 'strand', 'region', 'variant', 'variant_type')
+    #variant_ht.export(sites_txt_path)  # sites-only txt file for external use
     variant_ht.write(sites_ht_path, overwrite=args.overwrite)  # sites-only ht for external use
-    mt = add_sample_annotations(mt, hl_threshold)
+    #mt = add_sample_annotations(mt, hl_threshold)
 
+    '''
     sample_ht = mt.cols()
     sample_ht.group_by(sample_ht.hap).aggregate(n=hl.agg.count()).export(f'{output_dir}/haplogroup_counts.txt')  # counts of top level haplogroups
     sample_ht.export(sample_txt_path)  # sample annotations txt file for internal use
@@ -1091,7 +1158,7 @@ def main(args):
     vcf_variant_ht = vcf_mt.rows()
     rows_mt = hl.MatrixTable.from_rows_table(vcf_variant_ht).key_cols_by(s='foo')
     hl.export_vcf(rows_mt, sites_vcf_path, metadata=vcf_meta, append_to_header=vcf_header_file, tabix=True)  # sites-only vcf for external use
-
+    
     if args.drop_hap_defining:
         logger.info('Annotating MT after dropping haplogroup-defining variants...')
         mt_drop_hap = mt.filter_rows(~mt.hap_defining_variant)  # remove haplogroup-defining variants
@@ -1110,21 +1177,25 @@ def main(args):
         
         vcf_mt, vcf_meta, vcf_header_file = format_vcf(mt_drop_hap, output_dir, hl_threshold)
         hl.export_vcf(vcf_mt, samples_vcf_drop_hap_path, metadata=vcf_meta, append_to_header=vcf_header_file)  # full vcf for internal use (dropped haplogroup-defining variants)
-
+    '''
+    
     logger.info('All annotation steps are completed')
-
+    
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='This script adds variant annotations to the mitochondria VCF/MT')
-    parser.add_argument('-a', '--all_output', help='Output file that results from terra data download')
+    #parser.add_argument('-a', '--all_output', help='Output file that results from terra data download')
     parser.add_argument('-p', '--mt_path', help='Path to combined mt')
+    
     parser.add_argument('-r', '--vep_results', help='MatrixTable path to output vep results (either the existing results or where to ouput new vep results)')
     parser.add_argument('-t', '--hl_threshold', help='Cutoff to define a variant as homoplasmic', nargs='?', const=1, type=float, default=0.95)
     parser.add_argument('-m', '--alt_threshold', help='Minimum cutoff to define a variant as an alternative allele', nargs='?', const=1, type=float, default=0.01)
-    parser.add_argument('--subset_to_gnomad_release', help='Set to True to only include released gnomAD samples', action='store_true')
+    
+    #parser.add_argument('--subset_to_gnomad_release', help='Set to True to only include released gnomAD samples', action='store_true')
     parser.add_argument('--run_vep', help='Set to True to run/rerun vep', action='store_true')
+    
     parser.add_argument('--overwrite', help='Overwrites existing files', action='store_true')
-    parser.add_argument('--drop_hap_defining', help='Set to True to output file without haplogroup-defining variants', action='store_true')
+    #parser.add_argument('--drop_hap_defining', help='Set to True to output file without haplogroup-defining variants', action='store_true')
 
 
     args = parser.parse_args()

@@ -275,7 +275,8 @@ def apply_mito_artifact_filter(
     )
 
     artifact_sites = []
-    with hl.hadoop_open(artifact_prone_sites_path) as f:
+
+    with open(artifact_prone_sites_path, "r") as f:
         for line in f:
             pos = line.split()[2]
             artifact_sites.append(int(pos))
@@ -311,6 +312,7 @@ def main(args):
 
     input_tsv = args.input_tsv
 
+    artifact_prone_sites_path = args.artifact_prone_sites_path
     chunk_size = args.chunk_size
     overwrite = args.overwrite
     output_bucket = args.output_bucket
@@ -342,8 +344,8 @@ def main(args):
         combined_mt, coverage_mt_path, minimum_homref_coverage
     )
     
-    #logger.info("Applying artifact_prone_site fiter...")
-    #combined_mt = apply_mito_artifact_filter(combined_mt, artifact_prone_sites_path)
+    logger.info("Applying artifact_prone_site fiter...")
+    combined_mt = apply_mito_artifact_filter(combined_mt, artifact_prone_sites_path)
 
     logger.info("Writing combined MT and VCF...")
     # set the file names for output files
