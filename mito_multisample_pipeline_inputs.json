@@ -3,7 +3,7 @@
 	"MitochondriaMultiSamplePipeline.haplocheckCLI": "/home/ml2529/scratch60/dev/mito_files/haplocheckCLI.jar",
 	"MitochondriaMultiSamplePipeline.gatk": "$EBROOTGATK/gatk-package-4.1.9.0-local.jar",
 	"MitochondriaMultiSamplePipeline.compress_output_vcf": true,
-	"MitochondriaMultiSamplePipeline.inputSamplesFile": "/home/ml2529/scratch60/SFARI/SPARK_WGS_1_batch1-1/spark_wgs_1_batch1-1-1.tsv",
+	"MitochondriaMultiSamplePipeline.inputSamplesFile": "/home/ml2529/scratch60/SFARI/SPARK_WGS_1_batch2/spark_wgs_1_batch2-2.tsv",
 	"MitochondriaMultiSamplePipeline.mt_dict": "/home/ml2529/scratch60/dev/mito_files/Homo_sapiens_assembly38.chrM.dict",
 	"MitochondriaMultiSamplePipeline.mt_fasta": "/home/ml2529/scratch60/dev/mito_files/Homo_sapiens_assembly38.chrM.fasta",
 	"MitochondriaMultiSamplePipeline.mt_fasta_index": "/home/ml2529/scratch60/dev/mito_files/Homo_sapiens_assembly38.chrM.fasta.fai",

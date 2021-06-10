@@ -1,5 +1,6 @@
 *.out
 *.pyc
+*.log
 __pycache__/
 cromwell-executions/
 cromwell-workflow-logs/

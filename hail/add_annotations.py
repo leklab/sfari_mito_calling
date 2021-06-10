@@ -206,6 +206,19 @@ def add_terra_metadata(input_mt: hl.MatrixTable, all_output: str) -> hl.MatrixTa
     return input_mt
 
 
+def add_meta(input_mt: hl.MatrixTable, meta_file: str) -> hl.MatrixTable:
+
+    # add haplogroup and mutect/terra output annotations
+    ht = hl.import_table(meta_file, delimiter= '\t', key='ID')
+    input_mt = input_mt.annotate_cols(major_haplogroup = ht[input_mt.s].major_haplogroup)
+
+    # annotate the high level haplogroup by taking the first letter with the exception of H and L haplogroups
+    input_mt = input_mt.annotate_cols(hap=hl.if_else(input_mt.major_haplogroup.startswith("HV") | input_mt.major_haplogroup.startswith("L"),
+        input_mt.major_haplogroup[0:2],
+        input_mt.major_haplogroup[0]))
+
+    return input_mt
+
 def add_hap_defining(input_mt: hl.MatrixTable) -> hl.MatrixTable:
     """Adds bool on whether or not a variant is a haplogroup-defining variant to the MatrixTable
 
@@ -539,6 +552,17 @@ def add_min_variant_annotations(input_mt: hl.MatrixTable, hl_threshold: float = 
     # calculate max individual heteroplasmy
     max_HL = hl.agg.max(input_mt.HL)
 
+
+
+    # haplogroup annotations
+    pre_hap_AC = hl.agg.group_by(input_mt.hap, AC)
+    pre_hap_AN = hl.agg.group_by(input_mt.hap, AN)
+    pre_hap_AF = hl.agg.group_by(input_mt.hap, AF)
+    pre_hap_AC_het = hl.agg.group_by(input_mt.hap, AC_het)
+    pre_hap_AC_hom = hl.agg.group_by(input_mt.hap, AC_hom)
+    pre_hap_AF_hom = hl.agg.group_by(input_mt.hap, AF_hom)
+    pre_hap_AF_het = hl.agg.group_by(input_mt.hap, AF_het)
+
     annotation_struct = hl.struct(AC=AC,
         AN=AN,
         AF=AF,
@@ -559,11 +583,55 @@ def add_min_variant_annotations(input_mt: hl.MatrixTable, hl_threshold: float = 
                                     AC_het=AC_het,
                                     AF_hom=AF_hom,
                                     AF_het=AF_het,
-                                    max_hl=max_HL)))
+                                    max_hl=max_HL,
+                                    pre_hap_AC=pre_hap_AC,
+                                    pre_hap_AN=pre_hap_AN,
+                                    pre_hap_AF=pre_hap_AF,
+                                    pre_hap_AC_het=pre_hap_AC_het,
+                                    pre_hap_AF_het=pre_hap_AF_het,
+                                    pre_hap_AC_hom=pre_hap_AC_hom,
+                                    pre_hap_AF_hom=pre_hap_AF_hom)))
 
+
+
+    # order the haplogroup-specific annotations
+    list_hap_order = list(set(mt.hap.collect()))
+    mt = mt.annotate_globals(hap_order=sorted(list_hap_order))
+
+
+    # sanity check for haplogroups (make sure that they at least start with a letter) 
+    for i in list_hap_order:
+        if not re.match('^[A-Z]', i):
+            sys.exit(f'Invalid haplogroup {i}, does not start with a letter')
+
+
+    pre_hap_annotation_labels = ['pre_hap_AC',
+                            'pre_hap_AN',
+                            'pre_hap_AF',
+                            'pre_hap_AC_het',
+                            'pre_hap_AC_hom',
+                            'pre_hap_AF_hom',
+                            'pre_hap_AF_het']
+
+    for i in pre_hap_annotation_labels:
+        final_annotation = re.sub("pre_", "", i)  # remove "pre" prefix for final annotations
+        mt = mt.annotate_rows(**{final_annotation: standardize_haps(mt, i, sorted(list_hap_order))})
+
+
+    haplogroups = hl.eval(mt.globals.hap_order)
+    mt = mt.annotate_rows(haplogroups=[
+            hl.struct(
+                id=haplogroup,
+                an=mt.hap_AN[i],
+                ac_het=mt.hap_AC_het[i],
+                ac_hom=mt.hap_AC_hom[i]
+            )
+            for i, haplogroup in enumerate(haplogroups)
+        ])
 
     # last-minute drops (ever add back in?)
     #mt = mt.drop("AC", "AF", "hap_AC", "hap_AF", "hap_faf", "faf_hapmax", "alt_haps", "n_alt_haps")
+    mt = mt.drop("hap_AC", "hap_AF","hap_AF_het","hap_AF_hom","pre_hap_AF","pre_hap_AF_het","pre_hap_AF_hom")
 
     mt = mt.annotate_rows(filters=hl.if_else(mt.filters=={"PASS"}, hl.empty_set(hl.tstr), mt.filters))
 
@@ -611,12 +679,14 @@ def add_filter_annotations(input_mt: hl.MatrixTable, alt_threshold: float = 0.01
     input_mt = input_mt.annotate_entries(FT=hl.if_else(hl.len(input_mt.FT) == 0, ["PASS"], input_mt.FT))
 
     # add common_low_heteroplasmy flag to variants where the overall frequency is > 0.001 for samples with a heteroplasmy > 0 and < 0.50 and either "low_allele_frac" or "PASS" for the genotype filter
+    '''
     input_mt = input_mt.checkpoint("gs://gnomad-kristen/mitochondria/gnomadv3_1/gnomad_10_22_2020/test_laf.mt", overwrite=True)  # full matrix table for internal use
     input_mt = input_mt.annotate_rows(AC_mid_het=hl.agg.count_where((input_mt.HL < 0.50) & (input_mt.HL > 0.0) & ((input_mt.FT == ["PASS"]) | (input_mt.FT == ["low_allele_frac"]))))
     input_mt = input_mt.annotate_rows(AF_mid_het=input_mt.AC_mid_het/hl.agg.count_where(hl.is_defined(input_mt.HL) & ((input_mt.FT == ["PASS"]) | (input_mt.FT == ["low_allele_frac"]))))
     input_mt = input_mt.annotate_rows(common_low_heteroplasmy=input_mt.AF_mid_het > 0.001)
     common_low_het_count = input_mt.aggregate_rows(hl.agg.count_where(input_mt.common_low_heteroplasmy))
     logger.info(f'The "common_low_heteroplasmy" flag was applied to {common_low_het_count} variants')
+    '''
 
     # set HL to 0 if < alt_threshold and remove variants that no longer have at least one alt call
     input_mt = input_mt.annotate_entries(HL=hl.if_else((input_mt.HL > 0) & (input_mt.HL < alt_threshold), 0, input_mt.HL))
@@ -625,12 +695,14 @@ def add_filter_annotations(input_mt: hl.MatrixTable, alt_threshold: float = 0.01
     input_mt = input_mt.annotate_entries(FT=hl.if_else(input_mt.HL < alt_threshold, ["PASS"], input_mt.FT))
     input_mt = input_mt.annotate_entries(GT=hl.if_else(input_mt.HL < alt_threshold, hl.parse_call("0/0"), input_mt.GT))
 
+    '''
     # check that variants no longer contain the "low_allele_frac" filter (alt_threshold should be set to appropriate level to remove these variants)
     laf_rows = input_mt.filter_rows(hl.agg.any(hl.str(input_mt.FT).contains("low_allele_frac")))
     n_laf_rows = laf_rows.count_rows()
     if n_laf_rows > 0:
         sys.exit("low_allele_frac filter should no longer be present after applying alt_threshold (alt_threshold should equal the vaf_cutoff set in the mutect wdl)")
     input_mt = input_mt.filter_rows(hl.agg.any(input_mt.HL > 0))
+    '''
 
     # add variant-level indel_stack at any indel allele where all samples with a variant call had at least 2 different indels called at that position
     # if any sample had a solo indel at that position, do not filter 
@@ -658,15 +730,18 @@ def add_filter_annotations(input_mt: hl.MatrixTable, alt_threshold: float = 0.01
     npg_count = input_mt.aggregate_rows(hl.agg.count_where(hl.str(input_mt.filters).contains("npg")))
     logger.info(f'The "npg" filter was applied to {npg_count} variants')
 
+    '''
     for i in filters:
         annotation_name = i + "_hist"
         input_mt = input_mt.annotate_rows(**{annotation_name: generate_filter_histogram(input_mt, i)})
     input_mt = input_mt.annotate_rows(excluded_AC=hl.agg.count_where(input_mt.FT != ["PASS"]))
+    '''
 
     # remove "PASS" from filters column if it's not the only filter
     input_mt = input_mt.annotate_rows(filters=hl.if_else(input_mt.filters != {"PASS"}, input_mt.filters.remove("PASS"), input_mt.filters))
     
-    return input_mt, n_het_below_10_perc
+    #return input_mt, n_het_below_10_perc
+    return input_mt
 
 
 def filter_genotypes(input_mt: hl.MatrixTable) -> hl.MatrixTable:
@@ -1130,7 +1205,10 @@ def main(args):
 
     logger.info('Annotating MT...')
     #mt, n_het_below_10_perc = add_filter_annotations(mt, alt_threshold)
+    mt = add_filter_annotations(mt, alt_threshold)
     mt = filter_genotypes(mt)
+
+    mt = add_meta(mt, args.meta)
     mt = add_min_variant_annotations(mt, hl_threshold)
     #mt = mt.checkpoint(annotated_mt_path, overwrite=args.overwrite)  # full matrix table for internal use
 
@@ -1197,6 +1275,7 @@ if __name__ == '__main__':
     parser.add_argument('--overwrite', help='Overwrites existing files', action='store_true')
     #parser.add_argument('--drop_hap_defining', help='Set to True to output file without haplogroup-defining variants', action='store_true')
 
+    parser.add_argument('--meta', help='meta data file')
 
     args = parser.parse_args()
     
