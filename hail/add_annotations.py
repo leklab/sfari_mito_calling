@@ -217,6 +217,9 @@ def add_meta(input_mt: hl.MatrixTable, meta_file: str) -> hl.MatrixTable:
         input_mt.major_haplogroup[0:2],
         input_mt.major_haplogroup[0]))
 
+    #add population annotations
+    input_mt = input_mt.annotate_cols(pop = ht[input_mt.s].Ethnicity)
+
     return input_mt
 
 def add_hap_defining(input_mt: hl.MatrixTable) -> hl.MatrixTable:
@@ -563,6 +566,13 @@ def add_min_variant_annotations(input_mt: hl.MatrixTable, hl_threshold: float = 
     pre_hap_AF_hom = hl.agg.group_by(input_mt.hap, AF_hom)
     pre_hap_AF_het = hl.agg.group_by(input_mt.hap, AF_het)
 
+
+    # population annotations
+    pre_pop_AC = hl.agg.group_by(input_mt.pop, AC)
+    pre_pop_AN = hl.agg.group_by(input_mt.pop, AN)
+    pre_pop_AC_het = hl.agg.group_by(input_mt.pop, AC_het)
+    pre_pop_AC_hom = hl.agg.group_by(input_mt.pop, AC_hom)
+
     annotation_struct = hl.struct(AC=AC,
         AN=AN,
         AF=AF,
@@ -590,7 +600,11 @@ def add_min_variant_annotations(input_mt: hl.MatrixTable, hl_threshold: float = 
                                     pre_hap_AC_het=pre_hap_AC_het,
                                     pre_hap_AF_het=pre_hap_AF_het,
                                     pre_hap_AC_hom=pre_hap_AC_hom,
-                                    pre_hap_AF_hom=pre_hap_AF_hom)))
+                                    pre_hap_AF_hom=pre_hap_AF_hom,
+                                    pre_pop_AC=pre_pop_AC,
+                                    pre_pop_AN=pre_pop_AN,
+                                    pre_pop_AC_het=pre_pop_AC_het,
+                                    pre_pop_AC_hom=pre_pop_AC_hom)))
 
 
 
@@ -628,6 +642,36 @@ def add_min_variant_annotations(input_mt: hl.MatrixTable, hl_threshold: float = 
             )
             for i, haplogroup in enumerate(haplogroups)
         ])
+
+
+
+    # add populatation annotations
+    list_pop_order = list(set(mt.pop.collect()))
+    mt = mt.annotate_globals(pop_order=sorted(list_pop_order))
+
+
+    pre_pop_annotation_labels = ['pre_pop_AC',
+                        'pre_pop_AN',
+                        'pre_pop_AC_het',
+                        'pre_pop_AC_hom']
+
+    for i in pre_pop_annotation_labels:
+        final_annotation = re.sub("pre_", "", i)  # remove "pre" prefix for final annotations
+        mt = mt.annotate_rows(**{final_annotation: standardize_pops(mt, i, sorted(list_pop_order))})
+
+
+    populations = hl.eval(mt.globals.pop_order)
+
+    mt = mt.annotate_rows(populations=[
+            hl.struct(
+                id=population,
+                an=mt.pop_AN[i],
+                ac_het=mt.pop_AC_het[i],
+                ac_hom=mt.pop_AC_hom[i]
+            )
+            for i, population in enumerate(populations)
+        ])
+
 
     # last-minute drops (ever add back in?)
     #mt = mt.drop("AC", "AF", "hap_AC", "hap_AF", "hap_faf", "faf_hapmax", "alt_haps", "n_alt_haps")
